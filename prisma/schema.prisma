@@ -1,0 +1,137 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum EmailStatus {
+  PENDING
+  QUEUED
+  SENDING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+enum BatchStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model User {
+  id        String   @id @default(cuid())
+  googleId  String   @unique @map("google_id")
+  email     String
+  name      String
+  avatar    String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  senders          Sender[]
+  emailBatches     EmailBatch[]
+  scheduledEmails  ScheduledEmail[]
+  slackConnections SlackConnection[]
+
+  @@map("users")
+}
+
+model Sender {
+  id            String   @id @default(cuid())
+  userId        String   @map("user_id")
+  email         String
+  name          String?
+  enabled       Boolean  @default(true)
+  hourlyLimit   Int      @default(50) @map("hourly_limit")
+  minIntervalMs Int      @default(5000) @map("min_interval_ms")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  user            User             @relation(fields: [userId], references: [id])
+  scheduledEmails ScheduledEmail[]
+
+  @@unique([userId, email])
+  @@map("senders")
+}
+
+model EmailBatch {
+  id             String      @id @default(cuid())
+  userId         String      @map("user_id")
+  subject        String
+  body           String
+  startAt        DateTime    @map("start_at")
+  status         BatchStatus @default(PENDING)
+  idempotencyKey String      @unique @map("idempotency_key")
+  totalCount     Int         @default(0) @map("total_count")
+  sentCount      Int         @default(0) @map("sent_count")
+  failedCount    Int         @default(0) @map("failed_count")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  user            User             @relation(fields: [userId], references: [id])
+  scheduledEmails ScheduledEmail[]
+
+  @@index([userId, createdAt])
+  @@map("email_batches")
+}
+
+model ScheduledEmail {
+  id                String      @id @default(cuid())
+  batchId           String      @map("batch_id")
+  userId            String      @map("user_id")
+  senderId          String      @map("sender_id")
+  recipient         String
+  subject           String
+  body              String
+  scheduledAt       DateTime    @map("scheduled_at")
+  status            EmailStatus @default(PENDING)
+  sentAt            DateTime?   @map("sent_at")
+  providerMessageId String?     @map("provider_message_id")
+  attempts          Int         @default(0)
+  lastError         String?     @map("last_error")
+  idempotencyKey    String      @unique @map("idempotency_key")
+  claimedAt         DateTime?   @map("claimed_at")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+
+  batch  EmailBatch @relation(fields: [batchId], references: [id])
+  user   User       @relation(fields: [userId], references: [id])
+  sender Sender     @relation(fields: [senderId], references: [id])
+
+  @@index([userId, status])
+  @@index([senderId, scheduledAt])
+  @@index([status, scheduledAt])
+  @@index([batchId])
+  @@map("scheduled_emails")
+}
+
+model SlackConnection {
+  id             String   @id @default(cuid())
+  userId         String   @map("user_id")
+  teamId         String   @map("team_id")
+  teamName       String?  @map("team_name")
+  channelId      String?  @map("channel_id")
+  botUserId      String?  @map("bot_user_id")
+  encryptedToken String   @map("encrypted_token")
+  scopes         String
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, teamId])
+  @@map("slack_connections")
+}
+
+model Session {
+  sid    String   @id
+  sess   Json
+  expire DateTime
+
+  @@index([expire])
+  @@map("session")
+}

@@ -149,6 +149,16 @@ export const api = {
     async getSent(page = 1, size = 20): Promise<PaginatedSentEmails> {
       return request<PaginatedSentEmails>(`/api/emails/sent?page=${page}&size=${size}`);
     },
+    async reconcile(): Promise<{ ok: boolean; reconciled: number }> {
+      return request<{ ok: boolean; reconciled: number }>('/api/emails/reconcile', {
+        method: 'POST',
+      });
+    },
+    async dispatchNow(emailId: string): Promise<{ ok: boolean }> {
+      return request<{ ok: boolean }>(`/api/emails/${emailId}/dispatch-now`, {
+        method: 'POST',
+      });
+    },
     async search(params: {
       recipient?: string;
       subject?: string;

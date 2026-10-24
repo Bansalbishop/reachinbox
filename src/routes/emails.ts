@@ -2,7 +2,8 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth';
 import { prisma } from '../db';
-import { scheduleBatch } from '../services/scheduler';
+import { scheduleBatch, reconcileOverdueEmails } from '../services/scheduler';
+import { emailQueue } from '../lib/email-queue';
 import { indexEmail } from '../services/search';
 import { logger } from '../lib/logger';
 
@@ -184,6 +185,61 @@ router.get('/api/emails/sent', requireAuth, async (req: Request, res: Response) 
   ]);
 
   res.json({ emails, total, page, size });
+});
+
+// POST /api/emails/reconcile - Trigger manual queue synchronization
+router.post('/api/emails/reconcile', requireAuth, async (_req: Request, res: Response) => {
+  try {
+    const count = await reconcileOverdueEmails();
+    res.json({ ok: true, reconciled: count });
+  } catch (err: any) {
+    logger.error({ err }, 'Manual reconciliation failed');
+    res.status(500).json({ error: { message: 'Reconciliation failed', details: err?.message } });
+  }
+});
+
+// POST /api/emails/:id/dispatch-now - Force immediate dispatch of an overdue email
+router.post('/api/emails/:id/dispatch-now', requireAuth, async (req: Request, res: Response) => {
+  const emailId = String(req.params.id);
+  const email = await prisma.scheduledEmail.findFirst({
+    where: { id: emailId, userId: req.session.userId },
+  });
+
+  if (!email) {
+    res.status(404).json({ error: { message: 'Email not found', code: 'NOT_FOUND' } });
+    return;
+  }
+
+  const queue = emailQueue();
+  const jobId = `email-${email.id}`;
+
+  try {
+    const job = await queue.getJob(jobId);
+    if (job) {
+      const state = await job.getState();
+      if (state === 'delayed') {
+        await job.promote();
+      } else if (state === 'failed') {
+        await job.retry();
+      }
+    } else {
+      await queue.add(
+        'send',
+        { emailId: email.id, senderId: email.senderId },
+        { jobId, delay: 0 }
+      );
+    }
+
+    await prisma.scheduledEmail.update({
+      where: { id: email.id },
+      data: { status: 'QUEUED', scheduledAt: new Date() },
+    });
+
+    res.json({ ok: true, message: 'Dispatched for immediate processing' });
+  } catch (err: any) {
+    logger.error({ err, emailId: email.id }, 'Immediate dispatch failed');
+    res.status(500).json({ error: { message: 'Dispatch failed', details: err?.message } });
+  }
 });
 
 // GET /api/emails - Search/filter via Elasticsearch

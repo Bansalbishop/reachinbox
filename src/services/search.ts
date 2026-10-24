@@ -8,7 +8,11 @@ let _client: Client | null = null;
 
 export function esClient(): Client {
   if (!_client) {
-    _client = new Client({ node: config().ELASTICSEARCH_URL });
+    _client = new Client({
+      node: config().ELASTICSEARCH_URL,
+      maxRetries: 0,
+      requestTimeout: 1000,
+    });
   }
   return _client;
 }

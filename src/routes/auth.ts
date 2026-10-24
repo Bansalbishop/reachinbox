@@ -122,6 +122,7 @@ router.post('/api/auth/logout', (req: Request, res: Response) => {
     if (err) {
       logger.error({ err }, 'Logout session destroy failed');
     }
+    res.clearCookie('outbox.sid');
     res.clearCookie('connect.sid');
     res.json({ ok: true });
   });

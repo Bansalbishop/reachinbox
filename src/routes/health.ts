@@ -2,7 +2,6 @@ import { Router } from 'express';
 import { prisma } from '../db';
 import { redis } from '../redis';
 import { esClient } from '../services/search';
-import { logger } from '../lib/logger';
 
 const router = Router();
 
@@ -27,11 +26,18 @@ router.get('/health', async (_req, res) => {
     await esClient().ping();
     checks.elasticsearch = 'ok';
   } catch {
-    checks.elasticsearch = 'error';
+    checks.elasticsearch = 'unavailable';
   }
 
-  const allOk = Object.values(checks).every((v) => v === 'ok');
-  res.status(allOk ? 200 : 503).json({ status: allOk ? 'healthy' : 'degraded', checks });
+  const criticalOk = checks.postgres === 'ok' && checks.redis === 'ok';
+  const allOk = criticalOk && checks.elasticsearch === 'ok';
+
+  // Return HTTP 200 as long as critical services (Postgres + Redis) are operational.
+  // Elasticsearch has Postgres fallback in production.
+  res.status(criticalOk ? 200 : 503).json({
+    status: allOk ? 'healthy' : criticalOk ? 'degraded' : 'unhealthy',
+    checks,
+  });
 });
 
 export default router;

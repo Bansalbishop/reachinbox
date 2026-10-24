@@ -7,7 +7,7 @@ import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import connectPgSimple from 'connect-pg-simple';
 import { config } from './config';
-import { emailQueue, EMAIL_QUEUE_NAME } from './lib/email-queue';
+import { emailQueue } from './lib/email-queue';
 import { errorHandler, notFound } from './middleware/error-handler';
 import { requireAuth } from './middleware/auth';
 import healthRoutes from './routes/health';
@@ -25,7 +25,12 @@ export function createApp() {
   }
 
   // Security
-  app.use(helmet({ contentSecurityPolicy: false }));
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    })
+  );
   app.use(
     cors({
       origin: cfg.FRONTEND_URL,

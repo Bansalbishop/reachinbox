@@ -21,12 +21,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       setIsLoading(true);
       setError(null);
+
+      // Check if URL contains auth token from Google OAuth redirect
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const tokenFromUrl = params.get('token');
+        if (tokenFromUrl) {
+          localStorage.setItem('outbox_token', tokenFromUrl);
+          params.delete('token');
+          const newSearch = params.toString();
+          const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : '') + window.location.hash;
+          window.history.replaceState({}, document.title, newUrl);
+        }
+      }
+
       const res = await api.auth.getMe();
       setUser(res.user);
     } catch (err) {
       if (err instanceof ApiRequestError) {
         if (err.status === 401) {
-          // Normal unauthenticated state
+          // Token or session expired/invalid
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('outbox_token');
+          }
           setUser(null);
         } else {
           setError(err.message);
@@ -50,6 +67,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (err) {
       console.error('Logout error:', err);
     } finally {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('outbox_token');
+      }
       setUser(null);
       window.location.href = '/';
     }

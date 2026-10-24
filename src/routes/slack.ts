@@ -1,10 +1,10 @@
 import { Router, Request, Response } from 'express';
-import crypto from 'crypto';
 import { config } from '../config';
 import { prisma } from '../db';
 import { requireAuth } from '../middleware/auth';
 import { encryptToken } from '../services/slack-notifier';
 import { logger } from '../lib/logger';
+import { createAuthToken, verifyAuthToken } from '../lib/auth-token';
 
 const router = Router();
 
@@ -16,7 +16,8 @@ router.get('/api/slack/connect', requireAuth, (req: Request, res: Response) => {
     return;
   }
 
-  const state = crypto.randomBytes(32).toString('hex');
+  // Embed user ID securely in state token
+  const state = createAuthToken(req.session.userId!);
   req.session.slackOauthState = state;
 
   const params = new URLSearchParams({
@@ -37,15 +38,34 @@ router.get('/api/slack/connect', requireAuth, (req: Request, res: Response) => {
 });
 
 // GET /api/slack/callback - Handle Slack OAuth callback
-router.get('/api/slack/callback', requireAuth, async (req: Request, res: Response) => {
+router.get('/api/slack/callback', async (req: Request, res: Response) => {
   const cfg = config();
   const { code, state } = req.query;
 
-  if (!code || !state || state !== req.session.slackOauthState) {
+  if (!code || !state || typeof state !== 'string') {
     res.status(400).json({ error: { message: 'Invalid Slack OAuth state', code: 'INVALID_STATE' } });
     return;
   }
-  delete req.session.slackOauthState;
+
+  // Verify state either from session or cryptographic signature
+  const verifiedState = verifyAuthToken(state);
+  const isValidSession = req.session?.slackOauthState && req.session.slackOauthState === state;
+
+  if (!verifiedState && !isValidSession) {
+    res.status(400).json({ error: { message: 'Invalid Slack OAuth state', code: 'INVALID_STATE' } });
+    return;
+  }
+
+  const userId = verifiedState?.userId || req.session?.userId;
+  if (!userId) {
+    res.status(401).json({ error: { message: 'User session not found', code: 'UNAUTHORIZED' } });
+    return;
+  }
+
+  if (req.session) {
+    req.session.userId = userId;
+    delete req.session.slackOauthState;
+  }
 
   try {
     const tokenRes = await fetch('https://slack.com/api/oauth.v2.access', {
@@ -71,7 +91,7 @@ router.get('/api/slack/callback', requireAuth, async (req: Request, res: Respons
     await prisma.slackConnection.upsert({
       where: {
         userId_teamId: {
-          userId: req.session.userId!,
+          userId,
           teamId: data.team.id,
         },
       },
@@ -83,7 +103,7 @@ router.get('/api/slack/callback', requireAuth, async (req: Request, res: Respons
         channelId: data.incoming_webhook?.channel_id || null,
       },
       create: {
-        userId: req.session.userId!,
+        userId,
         teamId: data.team.id,
         teamName: data.team.name,
         encryptedToken,

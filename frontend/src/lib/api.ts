@@ -37,6 +37,12 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers.set('Content-Type', 'application/json');
   }
 
+  // Attach auth token if available (supports cross-origin third-party cookie restrictions)
+  const token = typeof window !== 'undefined' ? localStorage.getItem('outbox_token') : null;
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
   let response: Response;
   try {
     response = await fetch(url, {
@@ -82,8 +88,14 @@ export const api = {
   // URLs for direct browser redirects (OAuth and Bull Board)
   authUrls: {
     googleLogin: `${API_BASE_URL}/auth/google`,
-    bullBoard: `${API_BASE_URL}/admin/queues`,
-    slackConnect: `${API_BASE_URL}/api/slack/connect`,
+    get bullBoard() {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('outbox_token') : null;
+      return token ? `${API_BASE_URL}/admin/queues?token=${encodeURIComponent(token)}` : `${API_BASE_URL}/admin/queues`;
+    },
+    get slackConnect() {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('outbox_token') : null;
+      return token ? `${API_BASE_URL}/api/slack/connect?token=${encodeURIComponent(token)}` : `${API_BASE_URL}/api/slack/connect`;
+    },
   },
 
   // Auth
@@ -92,9 +104,15 @@ export const api = {
       return request<{ user: User }>('/api/auth/me');
     },
     async logout(): Promise<{ ok: boolean }> {
-      return request<{ ok: boolean }>('/api/auth/logout', {
-        method: 'POST',
-      });
+      try {
+        return await request<{ ok: boolean }>('/api/auth/logout', {
+          method: 'POST',
+        });
+      } finally {
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('outbox_token');
+        }
+      }
     },
   },
 

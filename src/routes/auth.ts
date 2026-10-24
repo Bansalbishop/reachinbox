@@ -5,6 +5,7 @@ import { config } from '../config';
 import { prisma } from '../db';
 import { requireAuth } from '../middleware/auth';
 import { logger } from '../lib/logger';
+import { createAuthToken } from '../lib/auth-token';
 
 const router = Router();
 
@@ -77,21 +78,24 @@ router.get('/auth/google/callback', async (req: Request, res: Response) => {
       },
     });
 
-    // Regenerate session after login
+    // Generate token for cross-origin authentication
+    const token = createAuthToken(user.id);
+    const redirectTarget = new URL(cfg.FRONTEND_URL);
+    redirectTarget.searchParams.set('token', token);
+
+    // Regenerate session after login (for cookie support)
     req.session.regenerate((err) => {
       if (err) {
-        logger.error({ err }, 'Session regeneration failed');
-        res.status(500).json({ error: { message: 'Session error', code: 'SESSION_ERROR' } });
+        logger.error({ err }, 'Session regeneration failed, redirecting with token');
+        res.redirect(redirectTarget.toString());
         return;
       }
       req.session.userId = user.id;
       req.session.save((saveErr) => {
         if (saveErr) {
           logger.error({ err: saveErr }, 'Session save failed');
-          res.status(500).json({ error: { message: 'Session error', code: 'SESSION_ERROR' } });
-          return;
         }
-        res.redirect(cfg.FRONTEND_URL);
+        res.redirect(redirectTarget.toString());
       });
     });
   } catch (err) {
@@ -108,7 +112,9 @@ router.get('/api/auth/me', requireAuth, async (req: Request, res: Response) => {
   });
 
   if (!user) {
-    req.session.destroy(() => {});
+    if (req.session?.destroy) {
+      req.session.destroy(() => {});
+    }
     res.status(401).json({ error: { message: 'User not found', code: 'USER_NOT_FOUND' } });
     return;
   }
@@ -118,14 +124,16 @@ router.get('/api/auth/me', requireAuth, async (req: Request, res: Response) => {
 
 // POST /api/auth/logout
 router.post('/api/auth/logout', (req: Request, res: Response) => {
-  req.session.destroy((err) => {
-    if (err) {
-      logger.error({ err }, 'Logout session destroy failed');
-    }
-    res.clearCookie('outbox.sid');
-    res.clearCookie('connect.sid');
-    res.json({ ok: true });
-  });
+  if (req.session?.destroy) {
+    req.session.destroy((err) => {
+      if (err) {
+        logger.error({ err }, 'Logout session destroy failed');
+      }
+    });
+  }
+  res.clearCookie('outbox.sid');
+  res.clearCookie('connect.sid');
+  res.json({ ok: true });
 });
 
 export default router;

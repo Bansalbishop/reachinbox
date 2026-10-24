@@ -165,19 +165,71 @@ async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
   }
 }
 
-async function main() {
+// async function main() {
+//   const cfg = config();
+
+//   await prisma.$connect();
+//   logger.info('Worker connected to PostgreSQL');
+
+//   // Reconcile on startup
+//   try {
+//     const count = await reconcilePendingEmails();
+//     if (count > 0) logger.info({ count }, 'Worker reconciled pending emails');
+//   } catch (err) {
+//     logger.error({ err }, 'Worker reconciliation failed');
+//   }
+
+//   const worker = new Worker<EmailJobData>(
+//     EMAIL_QUEUE_NAME,
+//     processEmailJob,
+//     {
+//       connection: createRedisConnection(),
+//       concurrency: cfg.WORKER_CONCURRENCY,
+//       limiter: undefined,
+//     }
+//   );
+
+//   worker.on('completed', (job) => {
+//     logger.debug({ jobId: job?.id }, 'Job completed');
+//   });
+
+//   worker.on('failed', (job, err) => {
+//     // Rate-limited jobs will be retried by BullMQ
+//     if (err.message === 'RATE_LIMITED') {
+//       logger.debug({ jobId: job?.id }, 'Job rate-limited, will retry');
+//     } else {
+//       logger.error({ jobId: job?.id, err: { message: err.message } }, 'Job failed');
+//     }
+//   });
+
+//   worker.on('error', (err) => {
+//     logger.error({ err }, 'Worker error');
+//   });
+
+//   logger.info(
+//     { concurrency: cfg.WORKER_CONCURRENCY, queue: EMAIL_QUEUE_NAME },
+//     'Email worker started'
+//   );
+
+//   // Graceful shutdown
+//   const shutdown = async (signal: string) => {
+//     logger.info({ signal }, 'Shutting down worker');
+//     await worker.close();
+//     await prisma.$disconnect();
+//     process.exit(0);
+//   };
+
+//   process.on('SIGTERM', () => shutdown('SIGTERM'));
+//   process.on('SIGINT', () => shutdown('SIGINT'));
+// }
+
+// main().catch((err) => {
+//   logger.error({ err }, 'Worker failed to start');
+//   process.exit(1);
+// });
+
+export async function startEmailWorker(): Promise<Worker<EmailJobData>> {
   const cfg = config();
-
-  await prisma.$connect();
-  logger.info('Worker connected to PostgreSQL');
-
-  // Reconcile on startup
-  try {
-    const count = await reconcilePendingEmails();
-    if (count > 0) logger.info({ count }, 'Worker reconciled pending emails');
-  } catch (err) {
-    logger.error({ err }, 'Worker reconciliation failed');
-  }
 
   const worker = new Worker<EmailJobData>(
     EMAIL_QUEUE_NAME,
@@ -194,11 +246,13 @@ async function main() {
   });
 
   worker.on('failed', (job, err) => {
-    // Rate-limited jobs will be retried by BullMQ
     if (err.message === 'RATE_LIMITED') {
       logger.debug({ jobId: job?.id }, 'Job rate-limited, will retry');
     } else {
-      logger.error({ jobId: job?.id, err: { message: err.message } }, 'Job failed');
+      logger.error(
+        { jobId: job?.id, err: { message: err.message } },
+        'Job failed'
+      );
     }
   });
 
@@ -207,23 +261,12 @@ async function main() {
   });
 
   logger.info(
-    { concurrency: cfg.WORKER_CONCURRENCY, queue: EMAIL_QUEUE_NAME },
+    {
+      concurrency: cfg.WORKER_CONCURRENCY,
+      queue: EMAIL_QUEUE_NAME,
+    },
     'Email worker started'
   );
 
-  // Graceful shutdown
-  const shutdown = async (signal: string) => {
-    logger.info({ signal }, 'Shutting down worker');
-    await worker.close();
-    await prisma.$disconnect();
-    process.exit(0);
-  };
-
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  return worker;
 }
-
-main().catch((err) => {
-  logger.error({ err }, 'Worker failed to start');
-  process.exit(1);
-});

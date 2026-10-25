@@ -221,6 +221,13 @@ router.post('/api/emails/:id/dispatch-now', requireAuth, async (req: Request, re
         await job.promote();
       } else if (state === 'failed') {
         await job.retry();
+      } else if (state !== 'active' && state !== 'waiting') {
+        await job.remove();
+        await queue.add(
+          'send',
+          { emailId: email.id, senderId: email.senderId },
+          { jobId, delay: 0 }
+        );
       }
     } else {
       await queue.add(
@@ -232,7 +239,7 @@ router.post('/api/emails/:id/dispatch-now', requireAuth, async (req: Request, re
 
     await prisma.scheduledEmail.update({
       where: { id: email.id },
-      data: { status: 'QUEUED', scheduledAt: new Date() },
+      data: { status: 'QUEUED', scheduledAt: new Date(), lastError: null },
     });
 
     res.json({ ok: true, message: 'Dispatched for immediate processing' });

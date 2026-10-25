@@ -101,6 +101,10 @@ export async function reconcileOverdueEmails(): Promise<number> {
             // Promote delayed job immediately since scheduled time has passed
             await job.promote();
             reconciled++;
+          } else if (state === 'failed') {
+            // Retry jobs that failed previously due to transient errors
+            await job.retry();
+            reconciled++;
           }
         }
       } catch (err: any) {

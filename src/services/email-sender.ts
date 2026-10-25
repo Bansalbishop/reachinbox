@@ -17,14 +17,20 @@ export function getTransporter(): nodemailer.Transporter {
         jsonTransport: true,
       });
     } else {
+      const isSecure = cfg.SMTP_PORT === 465;
       _transporter = nodemailer.createTransport({
         host: cfg.SMTP_HOST,
         port: cfg.SMTP_PORT,
-        secure: cfg.SMTP_PORT === 465,
+        secure: isSecure,
         auth: { user: cfg.SMTP_USER, pass: cfg.SMTP_PASS },
-        connectionTimeout: 10000,
-        greetingTimeout: 10000,
-        socketTimeout: 30000,
+        pool: true,
+        maxConnections: 3,
+        maxMessages: 100,
+        rateDelta: 1000,
+        rateLimit: 5,
+        connectionTimeout: 30000,
+        greetingTimeout: 30000,
+        socketTimeout: 45000,
       });
     }
   }
